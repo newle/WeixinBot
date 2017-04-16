@@ -25,6 +25,7 @@ from lxml import html
 # for media upload
 import mimetypes
 from requests_toolbelt.multipart.encoder import MultipartEncoder
+from online_input import redis_get_all_process
 
 
 def catchKeyboardInterrupt(fn):
@@ -277,6 +278,7 @@ class WebWeixin(object):
         if dic == '':
             return False
 
+        logging.debug(json.dumps(dic, ensure_ascii=False, indent=2))
         self.MemberCount = dic['MemberCount']
         self.MemberList = dic['MemberList']
         ContactList = self.MemberList[:]
@@ -383,6 +385,7 @@ class WebWeixin(object):
 
         pm = re.search(
             r'window.synccheck={retcode:"(\d+)",selector:"(\d+)"}', data)
+        print(data)
         retcode = pm.group(1)
         selector = pm.group(2)
         return [retcode, selector]
@@ -427,6 +430,8 @@ class WebWeixin(object):
         }
         headers = {'content-type': 'application/json; charset=UTF-8'}
         data = json.dumps(params, ensure_ascii=False).encode('utf8')
+        print("post url: {0}".format(url))
+        print("post data: {0}".format(data))
         r = requests.post(url, data=data, headers=headers)
         dic = r.json()
         return dic['BaseResponse']['Ret'] == 0
@@ -884,6 +889,7 @@ class WebWeixin(object):
                 time.sleep(time.time() - self.lastCheckTs)
 
     def sendMsg(self, name, word, isfile=False):
+        print("DEBUG: send msg, name {0} word {1}".format(name, word))
         id = self.getUSerID(name)
         if id:
             if isfile:
@@ -985,35 +991,41 @@ class WebWeixin(object):
             listenProcess = multiprocessing.Process(target=self.listenMsgMode)
             listenProcess.start()
 
+        print("[*] pingyin : {0}".format(self.User["Uin"]))
         while True:
-            text = input('')
-            if text == 'quit':
-                listenProcess.terminate()
-                print('[*] 退出微信')
-                logging.debug('[*] 退出微信')
-                exit()
-            elif text[:2] == '->':
-                [name, word] = text[2:].split(':')
-                if name == 'all':
-                    self.sendMsgToAll(word)
-                else:
-                    self.sendMsg(name, word)
-            elif text[:3] == 'm->':
-                [name, file] = text[3:].split(':')
-                self.sendMsg(name, file, True)
-            elif text[:3] == 'f->':
-                print('发送文件')
-                logging.debug('发送文件')
-            elif text[:3] == 'i->':
-                print('发送图片')
-                [name, file_name] = text[3:].split(':')
-                self.sendImg(name, file_name)
-                logging.debug('发送图片')
-            elif text[:3] == 'e->':
-                print('发送表情')
-                [name, file_name] = text[3:].split(':')
-                self.sendEmotion(name, file_name)
-                logging.debug('发送表情')
+            time.sleep(10)
+            text_list = redis_get_all_process(self.User["Uin"])
+            print('[*] 准备发送信息')
+            print(text_list)
+            for text in text_list:
+                if text == 'quit':
+                    listenProcess.terminate()
+                    print('[*] 退出微信')
+                    logging.debug('[*] 退出微信')
+                    exit()
+                elif text[:2] == '->':
+                    [name, word] = text[2:].split(':')
+                    print("name: {} word: {}".format(name, word))
+                    if name == 'all':
+                        self.sendMsgToAll(word)
+                    else:
+                        self.sendMsg(name, word)
+                elif text[:3] == 'm->':
+                    [name, file] = text[3:].split(':')
+                    self.sendMsg(name, file, True)
+                elif text[:3] == 'f->':
+                    print('发送文件')
+                    logging.debug('发送文件')
+                elif text[:3] == 'i->':
+                    print('发送图片')
+                    [name, file_name] = text[3:].split(':')
+                    self.sendImg(name, file_name)
+                    logging.debug('发送图片')
+                elif text[:3] == 'e->':
+                    print('发送表情')
+                    [name, file_name] = text[3:].split(':')
+                    self.sendEmotion(name, file_name)
+                    logging.debug('发送表情')
 
     def _safe_open(self, path):
         if self.autoOpen:
@@ -1068,13 +1080,18 @@ class WebWeixin(object):
     def _get(self, url: object, api: object = None) -> object:
         request = urllib.request.Request(url=url)
         request.add_header('Referer', 'https://wx.qq.com/')
-        if api == 'webwxgetvoice':
-            request.add_header('Range', 'bytes=0-')
-        if api == 'webwxgetvideo':
+        #headers = {'Referer': 'https://wx.qq.com/'}
+        if api == 'webwxgetvoice' or api == "webwxgetvideo":
+            #headers['Range'] = "bytes=0-"
             request.add_header('Range', 'bytes=0-')
         try:
             response = urllib.request.urlopen(request)
             data = response.read().decode('utf-8')
+            #res = requests.get(url, headers=headers)
+            #if(res.status_code != 200):
+            #    return ""
+
+            #data = res.content.decode("utf8")
             logging.debug(url)
             return data
         except urllib.error.HTTPError as e:
@@ -1100,6 +1117,7 @@ class WebWeixin(object):
 
 
         try:
+            logging.debug(url)
             response = urllib.request.urlopen(request)
             data = response.read()
             if jsonfmt:
